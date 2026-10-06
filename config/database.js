@@ -1,111 +1,116 @@
-let db;
+const { Pool } = require('pg');
+require('dotenv').config();
+
+let pool;
+let initPromise;
 
 const getDb = () => {
-  if (!db) {
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    db = new Database(path.join(__dirname, '..', 'data.db'));
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS buildings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        buildingName TEXT NOT NULL,
-        address TEXT DEFAULT '',
-        caretakerName TEXT DEFAULT '',
-        caretakerPhone TEXT DEFAULT '',
-        securityPhone TEXT DEFAULT '',
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE TABLE IF NOT EXISTS flats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        buildingId INTEGER NOT NULL,
-        flatNumber TEXT NOT NULL,
-        floor TEXT DEFAULT '',
-        monthlyRent REAL DEFAULT 0,
-        status TEXT DEFAULT 'vacant',
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (buildingId) REFERENCES buildings(id) ON DELETE CASCADE
-      );
-      CREATE TABLE IF NOT EXISTS tenants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT NOT NULL,
-        phone2 TEXT DEFAULT '',
-        ksebNo TEXT DEFAULT '',
-        address TEXT DEFAULT '',
-        idProof TEXT DEFAULT '',
-        documents TEXT DEFAULT '[]',
-        amenities TEXT DEFAULT '[]',
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE TABLE IF NOT EXISTS leases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenantId INTEGER NOT NULL,
-        flatId INTEGER NOT NULL,
-        leaseStart TEXT NOT NULL,
-        leaseEnd TEXT NOT NULL,
-        monthlyRent REAL DEFAULT 0,
-        advanceMonths REAL DEFAULT 0,
-        securityDeposit REAL DEFAULT 0,
-        moveOutDate TEXT,
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (tenantId) REFERENCES tenants(id) ON DELETE CASCADE,
-        FOREIGN KEY (flatId) REFERENCES flats(id) ON DELETE CASCADE
-      );
-      CREATE TABLE IF NOT EXISTS rent_payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        leaseId INTEGER NOT NULL,
-        month INTEGER NOT NULL,
-        year INTEGER NOT NULL,
-        amount REAL DEFAULT 0,
-        amountPaid REAL DEFAULT 0,
-        balance REAL DEFAULT 0,
-        paymentDate TEXT NOT NULL,
-        paymentMethod TEXT DEFAULT 'Cash',
-        status TEXT DEFAULT 'not_paid',
-        settled INTEGER DEFAULT 0,
-        discount REAL DEFAULT 0,
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (leaseId) REFERENCES leases(id) ON DELETE CASCADE
-      );
-      CREATE TABLE IF NOT EXISTS payment_allocations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        paymentId INTEGER NOT NULL,
-        leaseId INTEGER NOT NULL,
-        month INTEGER NOT NULL,
-        year INTEGER NOT NULL,
-        allocatedAmount REAL DEFAULT 0,
-        FOREIGN KEY (paymentId) REFERENCES rent_payments(id) ON DELETE CASCADE,
-        FOREIGN KEY (leaseId) REFERENCES leases(id) ON DELETE CASCADE
-      );
-    `);
-
-    const tableCols = {};
-    const getCols = (t) => tableCols[t] || (tableCols[t] = db.prepare("PRAGMA table_info(" + t + ")").all().map(c => c.name));
-    const addCol = (table, column, decl) => {
-      if (!getCols(table).includes(column)) db.exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl);
-    };
-    addCol('tenants', 'documents', "TEXT DEFAULT '[]'");
-    addCol('tenants', 'amenities', "TEXT DEFAULT '[]'");
-    addCol('tenants', 'phone2', "TEXT DEFAULT ''");
-    addCol('tenants', 'ksebNo', "TEXT DEFAULT ''");
-    addCol('rent_payments', 'settled', "INTEGER DEFAULT 0");
-    addCol('rent_payments', 'discount', "REAL DEFAULT 0");
-    ['tenants', 'flats', 'buildings', 'leases', 'rent_payments'].forEach(t => {
-      addCol(t, 'createdAt', 'TEXT');
-      addCol(t, 'updatedAt', 'TEXT');
-      db.exec("UPDATE " + t + " SET createdAt = COALESCE(createdAt, datetime('now')), updatedAt = COALESCE(updatedAt, datetime('now'))");
-    });
-
-    console.log('SQLite ready with payment_allocations');
+  if (!pool) {
+    if (process.env.DATABASE_URL) {
+      pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    } else {
+      pool = new Pool({
+        host: process.env.PGHOST || 'localhost',
+        port: Number(process.env.PGPORT) || 5432,
+        database: process.env.PGDATABASE || 'postgres',
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD || '',
+      });
+    }
   }
-  return db;
+  return pool;
 };
 
-module.exports = { getDb };
+const initDb = async () => {
+  if (initPromise) return initPromise;
+  initPromise = (async () => {
+    const client = new Pool({ connectionString: process.env.DATABASE_URL }).connect();
+    const c = await client;
+    try {
+      await c.query('BEGIN');
+      await c.query(`
+        CREATE TABLE IF NOT EXISTS buildings (
+          id SERIAL PRIMARY KEY,
+          "buildingName" TEXT NOT NULL,
+          address TEXT DEFAULT '',
+          area TEXT DEFAULT '',
+          "caretakerName" TEXT DEFAULT '',
+          "caretakerPhone" TEXT DEFAULT '',
+          "securityPhone" TEXT DEFAULT '',
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS flats (
+          id SERIAL PRIMARY KEY,
+          "buildingId" INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+          "flatNumber" TEXT NOT NULL,
+          floor TEXT DEFAULT '',
+          "monthlyRent" DOUBLE PRECISION DEFAULT 0,
+          status TEXT DEFAULT 'vacant',
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS tenants (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          phone TEXT NOT NULL,
+          phone2 TEXT DEFAULT '',
+          "ksebNo" TEXT DEFAULT '',
+          address TEXT DEFAULT '',
+          "idProof" TEXT DEFAULT '',
+          documents TEXT DEFAULT '[]',
+          amenities TEXT DEFAULT '[]',
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS leases (
+          id SERIAL PRIMARY KEY,
+          "tenantId" INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          "flatId" INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+          "leaseStart" TEXT NOT NULL,
+          "leaseEnd" TEXT NOT NULL,
+          "monthlyRent" DOUBLE PRECISION DEFAULT 0,
+          "advanceMonths" DOUBLE PRECISION DEFAULT 0,
+          "securityDeposit" DOUBLE PRECISION DEFAULT 0,
+          "moveOutDate" TEXT,
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS rent_payments (
+          id SERIAL PRIMARY KEY,
+          "leaseId" INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+          month INTEGER NOT NULL,
+          year INTEGER NOT NULL,
+          amount DOUBLE PRECISION DEFAULT 0,
+          "amountPaid" DOUBLE PRECISION DEFAULT 0,
+          balance DOUBLE PRECISION DEFAULT 0,
+          "paymentDate" TEXT NOT NULL,
+          "paymentMethod" TEXT DEFAULT 'Cash',
+          status TEXT DEFAULT 'not_paid',
+          settled INTEGER DEFAULT 0,
+          discount DOUBLE PRECISION DEFAULT 0,
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS payment_allocations (
+          id SERIAL PRIMARY KEY,
+          "paymentId" INTEGER NOT NULL REFERENCES rent_payments(id) ON DELETE CASCADE,
+          "leaseId" INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+          month INTEGER NOT NULL,
+          year INTEGER NOT NULL,
+          "allocatedAmount" DOUBLE PRECISION DEFAULT 0
+        );
+      `);
+      await c.query('COMMIT');
+      console.log('Postgres ready');
+    } catch (e) {
+      await c.query('ROLLBACK');
+      throw e;
+    } finally {
+      c.release();
+    }
+  })();
+  return initPromise;
+};
+
+module.exports = { getDb, initDb };

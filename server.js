@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { getDb } = require('./config/database');
+const { initDb } = require('./config/database');
 const buildingsRouter = require('./routes/buildings');
 const flatsRouter = require('./routes/flats');
 const tenantsRouter = require('./routes/tenants');
@@ -22,5 +22,9 @@ app.use('/api/payments', paymentsRouter);
 app.use('/api/sync', syncRouter);
 app.use(errorHandler);
 
-getDb();
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+initDb().then(() => {
+  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+}).catch(e => {
+  console.error('DB init failed', e);
+  process.exit(1);
+});

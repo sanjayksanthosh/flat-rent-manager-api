@@ -1,24 +1,32 @@
 const { getDb } = require('../config/database');
 
 const Building = {
-  getAll() {
-    return getDb().prepare('SELECT * FROM buildings ORDER BY createdAt DESC').all();
+  async getAll() {
+    const r = await getDb().query('SELECT * FROM buildings ORDER BY "createdAt" DESC');
+    return r.rows;
   },
-  getById(id) {
-    return getDb().prepare('SELECT * FROM buildings WHERE id = ?').get(id);
+  async getById(id) {
+    const r = await getDb().query('SELECT * FROM buildings WHERE id = $1', [id]);
+    return r.rows[0] || null;
   },
-  create(data) {
-    const stmt = getDb().prepare('INSERT INTO buildings (buildingName, address, area, caretakerName, caretakerPhone, securityPhone, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    const r = stmt.run(data.buildingName, data.address || '', data.area || '', data.caretakerName || '', data.caretakerPhone || '', data.securityPhone || '', new Date().toISOString());
-    return Building.getById(r.lastInsertRowid);
+  async create(data) {
+    const now = new Date().toISOString();
+    const r = await getDb().query(
+      `INSERT INTO buildings ("buildingName", address, area, "caretakerName", "caretakerPhone", "securityPhone", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING *`,
+      [data.buildingName, data.address || '', data.area || '', data.caretakerName || '', data.caretakerPhone || '', data.securityPhone || '', now]
+    );
+    return r.rows[0];
   },
-  update(id, data) {
-    getDb().prepare('UPDATE buildings SET buildingName=?, address=?, area=?, caretakerName=?, caretakerPhone=?, securityPhone=? WHERE id=?')
-      .run(data.buildingName, data.address || '', data.area || '', data.caretakerName || '', data.caretakerPhone || '', data.securityPhone || '', id);
+  async update(id, data) {
+    await getDb().query(
+      `UPDATE buildings SET "buildingName"=$1, address=$2, area=$3, "caretakerName"=$4, "caretakerPhone"=$5, "securityPhone"=$6, "updatedAt"=$7 WHERE id=$8`,
+      [data.buildingName, data.address || '', data.area || '', data.caretakerName || '', data.caretakerPhone || '', data.securityPhone || '', new Date().toISOString(), id]
+    );
     return Building.getById(id);
   },
-  delete(id) {
-    getDb().prepare('DELETE FROM buildings WHERE id = ?').run(id);
+  async delete(id) {
+    await getDb().query('DELETE FROM buildings WHERE id = $1', [id]);
   }
 };
 

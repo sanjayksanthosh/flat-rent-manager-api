@@ -1,20 +1,28 @@
 const { getDb } = require('../config/database');
 
-function tableSnapshot(table, since) {
+async function tableSnapshot(table, since) {
   const db = getDb();
-  const sql = since ? 'SELECT * FROM ' + table + ' WHERE updatedAt > ? OR createdAt > ? ORDER BY id' : 'SELECT * FROM ' + table + ' ORDER BY id';
-  const params = since ? [since, since] : [];
-  return db.prepare(sql).all(...params);
+  const params = [];
+  let sql = 'SELECT * FROM ' + table;
+  if (since) {
+    sql += ' WHERE "updatedAt" > $1 OR "createdAt" > $1';
+    params.push(since);
+  }
+  sql += ' ORDER BY id';
+  const r = await db.query(sql, params);
+  return r.rows;
 }
 
-exports.pull = (req, res) => {
-  const since = req.query.since || null;
-  res.json({
-    buildings: tableSnapshot('buildings', since),
-    flats: tableSnapshot('flats', since),
-    tenants: tableSnapshot('tenants', since),
-    leases: tableSnapshot('leases', since),
-    payments: tableSnapshot('rent_payments', since),
-    at: new Date().toISOString()
-  });
+exports.pull = async (req, res, next) => {
+  try {
+    const since = req.query.since || null;
+    res.json({
+      buildings: await tableSnapshot('buildings', since),
+      flats: await tableSnapshot('flats', since),
+      tenants: await tableSnapshot('tenants', since),
+      leases: await tableSnapshot('leases', since),
+      payments: await tableSnapshot('rent_payments', since),
+      at: new Date().toISOString()
+    });
+  } catch (e) { next(e); }
 };
