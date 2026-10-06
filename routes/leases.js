@@ -1,0 +1,11 @@
+const express = require('express');
+const router = express.Router();
+const c = require('../controllers/leaseController');
+router.get('/', c.getAll);
+router.get('/tenant/:tenantId', c.getByTenant);
+router.get('/flat/:flatId', c.getByFlat);
+router.get('/:id', c.getById);
+router.post('/', c.create);
+router.put('/:id/move-out', c.moveOut);
+router.delete('/:id', c.delete);
+module.exports = router;

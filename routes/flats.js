@@ -1,0 +1,10 @@
+const express = require('express');
+const router = express.Router();
+const c = require('../controllers/flatController');
+router.get('/', c.getAll);
+router.get('/building/:buildingId', c.getByBuilding);
+router.get('/:id', c.getById);
+router.post('/', c.create);
+router.put('/:id', c.update);
+router.delete('/:id', c.delete);
+module.exports = router;

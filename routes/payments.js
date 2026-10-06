@@ -1,0 +1,12 @@
+const express = require('express');
+const router = express.Router();
+const c = require('../controllers/paymentController');
+router.get('/summary', c.getSummary);
+router.get('/monthly-report', c.getMonthlyReport);
+router.get('/lease-expiry', c.getLeaseExpiry);
+router.get('/occupancy', c.getOccupancy);
+router.get('/lease/:leaseId', c.getByLease);
+router.get('/', c.getAll);
+router.get('/:id', c.getById);
+router.post('/', c.create);
+module.exports = router;
