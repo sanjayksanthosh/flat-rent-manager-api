@@ -8,6 +8,8 @@ const leasesRouter = require('./routes/leases');
 const paymentsRouter = require('./routes/payments');
 const errorHandler = require('./middleware/errorHandler');
 const syncRouter = require('./routes/sync');
+const authRouter = require('./routes/auth');
+const usersRouter = require('./routes/users');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +22,8 @@ app.use('/api/tenants', tenantsRouter);
 app.use('/api/leases', leasesRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/sync', syncRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/users', usersRouter);
 app.use(errorHandler);
 
 initDb().then(() => {

@@ -24,13 +24,31 @@ const getDb = () => {
 const initDb = async () => {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    const client = new Pool({ connectionString: process.env.DATABASE_URL }).connect();
-    const c = await client;
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const c = await pool.connect();
+    const { hashPassword } = require('../utils/auth');
     try {
       await c.query('BEGIN');
       await c.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          name TEXT DEFAULT '',
+          "passwordHash" TEXT NOT NULL,
+          role TEXT DEFAULT 'user',
+          "createdAt" TEXT,
+          "updatedAt" TEXT
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+          id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token TEXT UNIQUE NOT NULL,
+          "createdAt" TEXT,
+          "expiresAt" TEXT
+        );
         CREATE TABLE IF NOT EXISTS buildings (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           "buildingName" TEXT NOT NULL,
           address TEXT DEFAULT '',
           area TEXT DEFAULT '',
@@ -42,6 +60,7 @@ const initDb = async () => {
         );
         CREATE TABLE IF NOT EXISTS flats (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           "buildingId" INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
           "flatNumber" TEXT NOT NULL,
           floor TEXT DEFAULT '',
@@ -52,6 +71,7 @@ const initDb = async () => {
         );
         CREATE TABLE IF NOT EXISTS tenants (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
           phone TEXT NOT NULL,
           phone2 TEXT DEFAULT '',
@@ -65,6 +85,7 @@ const initDb = async () => {
         );
         CREATE TABLE IF NOT EXISTS leases (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           "tenantId" INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
           "flatId" INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
           "leaseStart" TEXT NOT NULL,
@@ -78,6 +99,7 @@ const initDb = async () => {
         );
         CREATE TABLE IF NOT EXISTS rent_payments (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           "leaseId" INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
@@ -94,20 +116,38 @@ const initDb = async () => {
         );
         CREATE TABLE IF NOT EXISTS payment_allocations (
           id SERIAL PRIMARY KEY,
+          "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           "paymentId" INTEGER NOT NULL REFERENCES rent_payments(id) ON DELETE CASCADE,
           "leaseId" INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
           "allocatedAmount" DOUBLE PRECISION DEFAULT 0
         );
+        CREATE INDEX IF NOT EXISTS idx_buildings_user ON buildings("userId");
+        CREATE INDEX IF NOT EXISTS idx_flats_user ON flats("userId");
+        CREATE INDEX IF NOT EXISTS idx_tenants_user ON tenants("userId");
+        CREATE INDEX IF NOT EXISTS idx_leases_user ON leases("userId");
+        CREATE INDEX IF NOT EXISTS idx_rent_payments_user ON rent_payments("userId");
       `);
+      // Seed default admin (admin / admin123) if no users exist.
+      const users = await c.query('SELECT COUNT(*) AS n FROM users');
+      if (Number(users.rows[0].n) === 0) {
+        const now = new Date().toISOString();
+        const ph = hashPassword('admin123');
+        await c.query(
+          `INSERT INTO users (username, name, "passwordHash", role, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, $5)`,
+          ['admin', 'Administrator', ph, 'admin', now]
+        );
+        console.log('Seeded default admin user (admin / admin123)');
+      }
       await c.query('COMMIT');
       console.log('Postgres ready');
     } catch (e) {
-      await c.query('ROLLBACK');
+      try { await c.query('ROLLBACK'); } catch (_) {}
       throw e;
     } finally {
       c.release();
+      pool.end();
     }
   })();
   return initPromise;

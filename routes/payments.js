@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const c = require('../controllers/paymentController');
+const { requireAuth } = require('../middleware/auth');
+router.use(requireAuth);
 router.get('/summary', c.getSummary);
 router.get('/monthly-report', c.getMonthlyReport);
 router.get('/lease-expiry', c.getLeaseExpiry);

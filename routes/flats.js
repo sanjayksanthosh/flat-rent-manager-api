@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const c = require('../controllers/flatController');
+const { requireAuth } = require('../middleware/auth');
+router.use(requireAuth);
 router.get('/', c.getAll);
 router.get('/building/:buildingId', c.getByBuilding);
 router.get('/:id', c.getById);

@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const c = require('../controllers/leaseController');
+const { requireAuth } = require('../middleware/auth');
+router.use(requireAuth);
 router.get('/', c.getAll);
 router.get('/tenant/:tenantId', c.getByTenant);
 router.get('/flat/:flatId', c.getByFlat);

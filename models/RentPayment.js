@@ -1,17 +1,17 @@
 const { getDb } = require('../config/database');
 
 const RentPayment = {
-  async getAll(filters) {
+  async getAll(filters, userId) {
     let sql = `
       SELECT rp.*, l."flatId", l."monthlyRent", l."tenantId", t.name AS "tenantName", f."flatNumber", b."buildingName", b.id AS "buildingId"
       FROM rent_payments rp
-      JOIN leases l ON l.id = rp."leaseId"
-      JOIN tenants t ON t.id = l."tenantId"
-      JOIN flats f ON f.id = l."flatId"
-      JOIN buildings b ON b.id = f."buildingId"
-      WHERE 1=1
+      JOIN leases l ON l.id = rp."leaseId" AND l."userId" = $1
+      JOIN tenants t ON t.id = l."tenantId" AND t."userId" = $1
+      JOIN flats f ON f.id = l."flatId" AND f."userId" = $1
+      JOIN buildings b ON b.id = f."buildingId" AND b."userId" = $1
+      WHERE rp."userId" = $1
     `;
-    const params = [];
+    const params = [userId];
     if (filters.month) { sql += ` AND rp.month = $${params.length + 1}`; params.push(filters.month); }
     if (filters.year) { sql += ` AND rp.year = $${params.length + 1}`; params.push(filters.year); }
     if (filters.buildingId) { sql += ` AND b.id = $${params.length + 1}`; params.push(filters.buildingId); }
@@ -21,19 +21,19 @@ const RentPayment = {
     const r = await getDb().query(sql, params);
     return r.rows;
   },
-  async getById(id) {
+  async getById(id, userId) {
     const r = await getDb().query(`
       SELECT rp.*, t.name AS "tenantName", f."flatNumber", b."buildingName"
       FROM rent_payments rp
-      JOIN leases l ON l.id = rp."leaseId"
-      JOIN tenants t ON t.id = l."tenantId"
-      JOIN flats f ON f.id = l."flatId"
-      JOIN buildings b ON b.id = f."buildingId"
-      WHERE rp.id = $1
-    `, [id]);
+      JOIN leases l ON l.id = rp."leaseId" AND l."userId" = $1
+      JOIN tenants t ON t.id = l."tenantId" AND t."userId" = $1
+      JOIN flats f ON f.id = l."flatId" AND f."userId" = $1
+      JOIN buildings b ON b.id = f."buildingId" AND b."userId" = $1
+      WHERE rp.id = $2 AND rp."userId" = $1
+    `, [userId, id]);
     return r.rows[0] || null;
   },
-  async create(data) {
+  async create(data, userId) {
     const db = getDb();
     const now = new Date().toISOString();
     const discount = data.discount || 0;
@@ -49,17 +49,17 @@ const RentPayment = {
     try {
       await client.query('BEGIN');
       const r = await client.query(
-        `INSERT INTO rent_payments ("leaseId", month, year, amount, "amountPaid", balance, "paymentDate", "paymentMethod", status, settled, discount, "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12) RETURNING id`,
-        [data.leaseId, data.month, data.year, amount, amountPaid, balance, data.paymentDate, data.paymentMethod || 'Cash', status, settled, discount, now]
+        `INSERT INTO rent_payments ("userId", "leaseId", month, year, amount, "amountPaid", balance, "paymentDate", "paymentMethod", status, settled, discount, "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13) RETURNING id`,
+        [userId, data.leaseId, data.month, data.year, amount, amountPaid, balance, data.paymentDate, data.paymentMethod || 'Cash', status, settled, discount, now]
       );
       const newId = r.rows[0].id;
       await client.query(
-        `INSERT INTO payment_allocations ("paymentId", "leaseId", month, year, "allocatedAmount") VALUES ($1, $2, $3, $4, $5)`,
-        [newId, data.leaseId, data.month, data.year, amountPaid]
+        `INSERT INTO payment_allocations ("userId", "paymentId", "leaseId", month, year, "allocatedAmount") VALUES ($1, $2, $3, $4, $5, $6)`,
+        [userId, newId, data.leaseId, data.month, data.year, amountPaid]
       );
       await client.query('COMMIT');
-      return RentPayment.getById(newId);
+      return RentPayment.getById(newId, userId);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -67,18 +67,18 @@ const RentPayment = {
       client.release();
     }
   },
-  async getDueSummary() {
+  async getDueSummary(userId) {
     const db = getDb();
     const leasesRes = await db.query(`
       SELECT l.id AS "leaseId", l."monthlyRent", l."advanceMonths", l."leaseStart", l."securityDeposit",
         t.id AS "tenantId", t.name AS "tenantName", t.phone AS "tenantPhone",
         f."flatNumber", b."buildingName", b.id AS "buildingId"
       FROM leases l
-      JOIN tenants t ON t.id = l."tenantId"
-      JOIN flats f ON f.id = l."flatId"
-      JOIN buildings b ON b.id = f."buildingId"
-      WHERE l."moveOutDate" IS NULL
-    `);
+      JOIN tenants t ON t.id = l."tenantId" AND t."userId" = $1
+      JOIN flats f ON f.id = l."flatId" AND f."userId" = $1
+      JOIN buildings b ON b.id = f."buildingId" AND b."userId" = $1
+      WHERE l."moveOutDate" IS NULL AND l."userId" = $1
+    `, [userId]);
     const activeLeases = leasesRes.rows;
 
     const now = new Date();
@@ -92,8 +92,8 @@ const RentPayment = {
       const startYear = leaseStart.getFullYear();
 
       const pmtRes = await db.query(`
-        SELECT month, year, "amountPaid", amount, settled, discount FROM rent_payments WHERE "leaseId" = $1 ORDER BY year, month
-      `, [l.leaseId]);
+        SELECT month, year, "amountPaid", amount, settled, discount FROM rent_payments WHERE "leaseId" = $1 AND "userId" = $2 ORDER BY year, month
+      `, [l.leaseId, userId]);
       const payments = pmtRes.rows;
 
       const monthsBeforeCurrent = (currentYear - startYear) * 12 + (currentMonth - startMonth);
@@ -133,10 +133,10 @@ const RentPayment = {
     }
     return results;
   },
-  async getMonthlyReport(buildingId, month, year, statusFilter, search) {
+  async getMonthlyReport(buildingId, month, year, statusFilter, search, userId) {
     const db = getDb();
-    let flatsSql = 'SELECT * FROM flats WHERE 1=1';
-    const flatsParams = [];
+    let flatsSql = 'SELECT * FROM flats WHERE "userId" = $1';
+    const flatsParams = [userId];
     if (buildingId) { flatsSql += ` AND "buildingId" = $${flatsParams.length + 1}`; flatsParams.push(buildingId); }
     flatsSql += ' ORDER BY "flatNumber"';
     const flatsRes = await db.query(flatsSql, flatsParams);
@@ -146,10 +146,10 @@ const RentPayment = {
     for (const flat of flats) {
       const leaseRes = await db.query(`
         SELECT l.*, t.name AS "tenantName", t.phone AS "tenantPhone", t.id AS "tenantId"
-        FROM leases l JOIN tenants t ON t.id = l."tenantId"
-        WHERE l."flatId" = $1
+        FROM leases l JOIN tenants t ON t.id = l."tenantId" AND t."userId" = $1
+        WHERE l."flatId" = $2 AND l."userId" = $1
         ORDER BY l."leaseStart" DESC
-      `, [flat.id]);
+      `, [userId, flat.id]);
       const lease = leaseRes.rows.find(l => {
         if (!l.leaseStart) return false;
         const startParts = l.leaseStart.split('-');
@@ -183,8 +183,8 @@ const RentPayment = {
       let outstanding = monthlyRent;
 
       const allPaymentsRes = await db.query(`
-        SELECT id, month, year, "amountPaid", amount, settled, discount FROM rent_payments WHERE "leaseId" = $1 ORDER BY year, month
-      `, [lease.id]);
+        SELECT id, month, year, "amountPaid", amount, settled, discount FROM rent_payments WHERE "leaseId" = $1 AND "userId" = $2 ORDER BY year, month
+      `, [lease.id, userId]);
       const allPayments = allPaymentsRes.rows;
 
       const monthDueFor = (m, y) => {
@@ -256,25 +256,25 @@ const RentPayment = {
     }
     return results;
   },
-  async getLeaseExpiryReport(days) {
+  async getLeaseExpiryReport(days, userId) {
     const future = new Date();
     future.setDate(future.getDate() + days);
     const r = await getDb().query(`
       SELECT l.*, t.name AS "tenantName", t.phone AS "tenantPhone", f."flatNumber", b."buildingName"
       FROM leases l
-      JOIN tenants t ON t.id = l."tenantId"
-      JOIN flats f ON f.id = l."flatId"
-      JOIN buildings b ON b.id = f."buildingId"
-      WHERE l."moveOutDate" IS NULL AND l."leaseEnd" BETWEEN $1 AND $2
+      JOIN tenants t ON t.id = l."tenantId" AND t."userId" = $1
+      JOIN flats f ON f.id = l."flatId" AND f."userId" = $1
+      JOIN buildings b ON b.id = f."buildingId" AND b."userId" = $1
+      WHERE l."moveOutDate" IS NULL AND l."userId" = $1 AND l."leaseEnd" BETWEEN $2 AND $3
       ORDER BY l."leaseEnd"
-    `, [new Date().toISOString().split('T')[0], future.toISOString().split('T')[0]]);
+    `, [userId, new Date().toISOString().split('T')[0], future.toISOString().split('T')[0]]);
     return r.rows;
   },
-  async getOccupancyReport() {
+  async getOccupancyReport(userId) {
     const db = getDb();
-    const total = (await db.query('SELECT COUNT(*) AS c FROM flats')).rows[0];
-    const occupied = (await db.query("SELECT COUNT(*) AS c FROM flats WHERE status = 'occupied'")).rows[0];
-    const vacant = (await db.query("SELECT COUNT(*) AS c FROM flats WHERE status = 'vacant'")).rows[0];
+    const total = (await db.query('SELECT COUNT(*) AS c FROM flats WHERE "userId" = $1', [userId])).rows[0];
+    const occupied = (await db.query("SELECT COUNT(*) AS c FROM flats WHERE status = 'occupied' AND \"userId\" = $1", [userId])).rows[0];
+    const vacant = (await db.query("SELECT COUNT(*) AS c FROM flats WHERE status = 'vacant' AND \"userId\" = $1", [userId])).rows[0];
     return { totalFlats: Number(total.c), occupiedFlats: Number(occupied.c), vacantFlats: Number(vacant.c) };
   }
 };
