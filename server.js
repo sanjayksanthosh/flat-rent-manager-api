@@ -16,6 +16,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api/buildings', buildingsRouter);
 app.use('/api/flats', flatsRouter);
 app.use('/api/tenants', tenantsRouter);
